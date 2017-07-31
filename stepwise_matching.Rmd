@@ -1,0 +1,274 @@
+---
+title: "Stepwise data matching process"
+output: html_document
+---
+
+## Summary
+
+The Residents Matrix matching process consists of merging different data sets in order to 
+
+
+1- Working Address and Post Code - (WAPC)
+2- Troncade first 8 characters and Post Code - (T8PC) 
+3- Troncade first 8 characters and Post Code, but eliminating the word FLAT - (T8_FPC)
+4- Property and Premise number and Post Code - (PPNPC)
+5- Working Address (Without Post Code) - (WAWPC)
+
+
+
+## 1. Opening relevant R packages
+
+```{r setup, include=TRUE, warning=FALSE, message=FALSE}
+
+library("data.table")
+library("dplyr")
+library("reshape2")
+library("ggplot2")
+library("stringdist")
+library("stringr")
+library("tm")
+
+rm(list = ls())
+
+```
+
+
+## 2. Upload raw data and define working data sets.
+
+Data sets are defined as "a" and "b", where "a" will be the base data set, in other words, the file to which new variables will be added to. Usually, "a" will be the largest data set. In addition, one or more "filter" data frames may be defined as "f" (e.g. f1, f2) with the aim of filtering out irrelevant records from the original data sets (e.g. use blpu to filter out commercial properties).
+
+### 2.1- Define working directory
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+
+# Define working Directory
+wd<- setwd("//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/Community Mapping 2017/Juans_tests/2015")
+wd
+```
+
+
+
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+
+# Upload data sets 
+a<- fread("gz_tidy.csv") # Gazeteer tidy data
+names(a)
+nrow(a)
+b<-fread("gp_tidy.csv") # GP tidy data 
+names(b)
+nrow(b)
+
+####################
+
+#FUNCTION
+
+matching <- function (a,b) {
+
+  first_join<-merge(b,a,by.y=names(a)[2], by.x=names(b)[2], all.x = TRUE)
+  unmatch_1<- first_join %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+  match_1<- first_join %>% filter(!is.na(adr_gz)) %>%
+    select(grep("adr|UPRN|id|V1.x",names(first_join)))
+  
+  second_join<-merge(unmatch_1,a,by.y=names(a)[4], by.x=names(b)[4], all.x = TRUE)
+  unmatch_2<- second_join %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+  match_2<- second_join %>% filter(!is.na(adr_gz)) %>%
+    select(grep("adr|UPRN|id|V1.x",names(first_join)))
+  
+  third_join<-merge(unmatch_2,a,by.y=names(a)[5], by.x=names(b)[5], all.x = TRUE)
+  unmatch_3<- third_join %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+  match_3<- third_join %>% filter(!is.na(adr_gz)) %>%
+    select(grep("adr|UPRN|id|V1.x",names(first_join)))
+
+  fourth_join<-merge(unmatch_3,a,by.y=names(a)[6], by.x=names(b)[6], all.x = TRUE)
+  unmatch_4<- fourth_join %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+  match_4<- fourth_join %>% filter(!is.na(adr_gz)) %>%
+    select(grep("adr|UPRN|id|V1.x",names(first_join)))
+  
+  fifth_join<-merge(unmatch_4,a,by.y=names(a)[3], by.x=names(b)[3], all.x = TRUE)
+  unmatch_5<- fifth_join %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+  match_5<- fifth_join %>% filter(!is.na(adr_gz)) %>%
+    select(grep("adr|UPRN|id|V1.x",names(first_join)))
+
+
+  matches<-c((nrow(match_1)),(nrow(match_2)),(nrow(match_3)),
+               (nrow(match_4)),(nrow(match_5)))
+  unmatches<-c((nrow(unmatch_1)),(nrow(unmatch_2)),(nrow(unmatch_3)),
+               (nrow(unmatch_4)),(nrow(unmatch_5)))
+  df<-as.data.frame(cbind(matches,unmatches))
+  print(df)
+}
+
+#############
+#############
+step<-function(match,unmatch) {
+        
+  loop_join<-merge(unmatch,a,by.y=id.a, by.x=id.b, all.x = TRUE)
+  match<- loop_join %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+  unmatch<- loop_join %>% filter(!is.na(adr_gz)) %>%
+    select(grep("adr|UPRN|id|V1.x",names(first_join)))  
+}
+
+```
+
+
+# PAST ACTUALLY WORKING
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+
+x1<-left_join(b,a,by= c("WAPC_gp"="WAPC_gz"))
+
+x1f.1<- x1 %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+names(x1f.1)
+nrow(x1f.1)
+
+x1f.2<- x1 %>% filter(!is.na(adr_gz)) %>% select(grep("adr|UPRN|id|V1.x",names(x1)))
+names(x1f.2)
+nrow(x1f.2)
+
+x2<-left_join(x1f.1,a,by= c("T8PC_gp"="T8PC_gz"))                
+x2f.1<- x2 %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+nrow(x2f.1)
+x2f.2<- x2 %>% filter(!is.na(adr_gz)) %>% select(grep("adr|UPRN|id|V1.x",names(x1)))
+nrow(x2f.2)
+
+
+x3<-left_join(x2f.1,a,by= c("T8_FPC_gp"="T8_FPC_gz"))
+x3f.1<- x3 %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+nrow(x3f.1)
+
+x3f.2<- x3 %>% filter(!is.na(adr_gz)) %>% select(grep("adr|UPRN|id|V1.x",names(x1)))
+nrow(x3f.2)                                            
+
+x4<-left_join(x3f.1,a,by= c("PPNPC_gp"="PPNPC_gz"))
+x4f.1<- x4 %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+nrow(x4f.1)
+
+x4f.2<- x4 %>% filter(!is.na(adr_gz)) %>% select(grep("adr|UPRN|id|V1.x",names(x1)))
+nrow(x4f.2)
+
+
+x5<-left_join(x4f.1,a,by= c("WAWPC_gp"="WAWPC_gz"))
+x5f.1<- x5 %>% filter(is.na(adr_gz))  %>% select(grep("adr|UPRN|id|V1.x",names(x1)))
+nrow(x5f.1)
+
+x5f.2<- x5 %>% filter(!is.na(adr_gz)) %>% select(grep("adr|UPRN|id|V1.x",names(x1)))
+nrow(x5f.2)
+
+
+good<-rbind(x1f.2,x2f.2,x3f.2,x4f.2,x5f.2,x5f.1)
+nrow(good)
+
+#bad<-rbind(x2f.1,x3f.1,x4f.1,x5f.1)
+#nrow(bad)
+
+df_grouped <- good[order(good$V1.x),]
+
+df_grouped <- df_grouped[!duplicated(good$V1.x),]
+
+
+dup <- df_grouped[duplicated(good$V1.x),]
+
+
+DUPLICATES
+n_o <- data.frame(table(good$V1.x))
+n_o[n_o$Freq > 1,]
+
+good %>% filter(V1.x==95699)
+
+###########
+
+
+df1<-inner_join(df, gazet_df, by="ID") 
+left_join(b,a,by= c("WAPC_gp"="WAPC_gz"))
+nrow(df2) # 64,464 new=64,562
+
+df_final<-inner_join(df2,gp_tidy, by="ID") 
+nrow(df_final) # 203,710 new=204,145
+
+```
+
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+
+##############################
+## MERGING GPs and GAZETEER ##
+##############################
+
+# Merging datasets of UNIQUE ID's
+#################################
+
+
+df<-semi_join(gp_unique,gazet_df, by="ID") 
+nrow(df) # 64,195  new= 64,283
+no.match<-anti_join(gp_unique, gazet_df, by="ID")
+nrow(no.match)# 2,818 new=2,730 
+# Accuracy
+paste0(round(100-nrow(no.match)/nrow(df)*100,3),"%")# 96.61% (new=95.753%)
+
+
+# Merging back datasets
+#################################
+df2<-inner_join(df, gazet_df, by="ID") 
+nrow(df2) # 64,464 new=64,562
+
+df_final<-inner_join(df2,gp_tidy, by="ID") 
+nrow(df_final) # 203,710 new=204,145
+
+# Accuracy UPRN
+#################################
+
+### Does not include Phil's non-matches
+audit<-df_final %>% filter(!is.na(UPRN_match)) %>%
+  filter(UPRN_match!="?") %>%
+
+
+perc<-audit %>% group_by(check) %>% count()  
+paste0(round(perc[2,2]/(perc[2,2]+perc[1,2])*100,3),"%") #98.374%  new="98.324%"
+
+wrongly.match<- audit %>% filter(check==0)
+
+# Accuracy TOTAL RECORS FROM GP'S
+#################################
+paste0(round(nrow(df_final) / nrow(gp_tidy),5)*100,"%") #98.053% new= 98.262%%
+
+# Visual inspection of no matches
+exp<-audit %>% filter(check==0) %>% select(PREMISES, STREET, ADDRESS)
+head(exp,200)
+exp2<-audit %>% filter(check==0) %>% select(UPRN, UPRN_match)
+head(exp2,200)
+
+
+# NO MATCHES
+names(gp_tidy)[1]<-"UPRN"
+gp.fil <- gp_tidy %>% filter(!is.na(UPRN)) %>% # filtering the ones no UPRN matched by Phil
+  filter(UPRN!="?")
+no<-anti_join(gp.fil, df_final, by="UPRN")
+nrow(no)# 4,224 new=3,942
+
+###########
+#######################
+##############
+
+data<-function(a,b){
+  
+fleft_join(b,a,by= c(="T8PC_gz"))      
+  }
+
+x2<-fleft_join(x1f.1,a,by= c("T8PC_gp"="T8PC_gz"))                  
+x2f.1<- x2 %>% filter(is.na(adr_gz)) %>% select(1:length(names(b)))
+nrow(x2f.1)
+x2f.2<- x2 %>% filter(!is.na(adr_gz)) %>% select(grep("adr|UPRN|id|V1.x",names(x1)))
+nrow(x2f.2)
+
+
+
+```
+
+
+
+
+
+
+
+
