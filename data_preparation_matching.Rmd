@@ -1,0 +1,435 @@
+---
+title: "Residents Matrix: Files preparation and cleaning for matching data sets based on addresses."
+output: html_document
+---
+
+## Summary
+
+The Residents Matrix matching process consists of merging different data sets in order to obtain a single view of residents and households. The present document details the data transformation and cleansing process that need to take place in order to match two data sets with no Unique Identifiers or with unreliable key identifiers. The script creates two new files ("[LABEL]_tidy.csv") with unique identifiers based on addresses. 
+
+The steps to be followed are listed bellow. This stages will be explain in more detail in the rest of the document.
+
+1. Opening relevant R packages.
+2. Upload raw data and define working data sets.
+3. Filtering out irrelevant records in one dataset based on variables from another.
+4. Creating two clean matching datasets.
+5. Creating Unique Identifiers based on addresses.
+6. Selecting and renaming variables in both data sets.
+7. Printing final files (.csv). 
+
+## 1. Opening relevant R packages
+
+```{r setup, include=TRUE, warning=FALSE, message=FALSE}
+
+library("data.table")
+library("dplyr")
+library("reshape2")
+library("ggplot2")
+library("stringdist")
+library("stringr")
+library("tm")
+
+rm(list = ls())
+
+```
+
+
+## 2. Upload raw data and define working data sets.
+
+Data sets are defined as "a" and "b", where "a" will be the base data set, in other words, the file to which new variables will be added. Usually, "a" will be the largest data set. In addition, one or more "filter" data frames may be defined as "f" (e.g. f1, f2) with the aim of filtering out irrelevant records from the original data sets (e.g. use blpu to filter out commercial properties).
+
+### 2.1- Define working directory
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+
+# Define working Directory
+wd<- setwd("//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/Community Mapping 2017/Juans_tests/2015")
+wd
+```
+
+
+### 2.2- Uploading raw data
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+
+# Upload data sets 
+a<- fread("UNI2LIVEGAZVIEW.csv", na.strings=c("")) # Gazeteer raw data
+names(a)
+b<- fread("GP_Register_2015.csv", na.strings=c("")) # GP Registry
+names(b)
+
+# Define filtering data sets
+f1<- fread("BLPU.csv", na.strings=c("")) # blpu raw data
+names(f1)
+#f2<- fread("postcodeswithLA.csv") # Post codes within the Borough bounderies
+#names(f2)[3]<-c("pc")
+#names(f2)
+
+```
+
+### 2.3- Define variable labels
+
+The variables from the output files will identify the original data set that they were created from by adding a suffix at the end of the name of the variable. For instance, we can define "zt" as the suffix identifying variables from the Gazetteer data set, so the variable address will be called "adr_gz". The labels for the suffix in each data set can be defined below.  
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+
+label.a<- "gz" # define label here 
+  
+label.b<- "gp" # define label here 
+  
+  
+```
+
+
+
+## 3. Filtering out irrelevant records in one dataset based on variables from another dataset. 
+This step starts by applying a relevant filtering criteria to the "Filter data set" (e.g. valid addresses in the "blpu"). Then, the new "Filter data set" is **semi-joined** with the data set to be filtered (e.g. Gazetteer), so only rows matching records in both data sets are retained. Of course, this step can only be applied if there is a common unique identifier in both data sets. This step can be skipped if all records in the data sets are relevant. 
+
+### 3.1- Example filtering Gzeteer based on blpu. 
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+f1_tidy<- f1 #%>% filter(LOGICAL_ST==1)%>% #filtering current valid addresses (e.g. non- historical)
+#        select(UPRN, BLPU_CLASS,BLPU_CLA_1, MAP_X, MAP_Y, WARD_CODE)%>% # select relevant variables
+#        filter(grepl("^R|RD|CH|CR|RI",BLPU_CLASS))%>% #All residential related plus shops and hotels
+#        filter(!grepl("RG",BLPU_CLASS)) # remove garages
+
+# Creating Final Gazeeter dataset 
+a<- semi_join(a,f1_tidy, by="UPRN") 
+nrow(a)
+
+```
+
+### 3.2- Example filtering records with Post Codes out of the Borough (eval=FALSE by default)
+
+Filtering addresses out of the Borough is crucial for some data sets such as the School Census.
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE, eval=FALSE}
+
+b<-left_join(b,f2, by="pc") %>%
+  filter(NAME=="Barking and Dagenham London Boro")
+nrow(b) 
+
+```
+
+
+## 4. Creating two clean matching datasets
+
+Cleaning the data sets is a process that will vary depending on the original layout of each file. In general, the steps to be followed are:
+
++ **Selecting relevant variables:** This includes any Unique Identifier, variable containing addresses information, geo-location variables, and other variables of interest. 
++ **Renaming variables in an standard short format:** For instance, the first address field adr1, and the postcode will be pc. 
++ **Creating a clean working-address:** The working address removes redundant information (e.g. Barking, Essex) and blank spaces, correct/modify frequent typos and abbreviations (e.g. Rd instead of Road, Av instead of Avenue), make everything uppercase, among other changes. 
+
+
+### 4.1- Cleaning data set "a" (e.g. Gazetteer)
+
+Note that the Gazetteer that we use as example for data set "a" is very "clean" and accurate, and consequently, it requires less modifications than other manually-inputted data sets. However, we follow all the cleaning steps even if they are not required for this specific data set.  
+
+
+#### 4.1.1- Filtering relevant records, renaming variables and uppercasing 
+
+This section will need to be **ADAPTED** to each specific data set.  
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working<- a %>% filter(LOGICAL_ST==1) %>% # Filtering valid addresses (e.g. non historical)
+  select(UPRN=UPRN, adr1= ADDRESS, sfx.adr1=PAO_START1,sfx.adr2=SAO_START1,
+         pc=POSTCODE, geo_east=MAP_EAST, geo_north=MAP_NORTH) %>%
+  mutate(work.adr=sub("( Romford Essex.*)| (Barking Essex.*)|( Dagenham Essex.*)|( Chadwell Heath Romford.*)|( Rush Green Romford.*)","",adr1)) %>%#eliminate anything from locality onwards
+  mutate(work.adr= toupper(work.adr)) # change text to upper case
+
+```
+
+#### 4.1.2- Removing spaces, commas and other characteres
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>% mutate(work.adr= sub("^\\s+|\\s+$", "", work.adr)) %>% #remove trailing and leading white space
+              mutate(work.adr=  gsub("'","", work.adr)) %>% # replace apostrophe with "" 
+              mutate(work.adr= gsub("[\\,\\`\\.\\_]+"," ",work.adr)) %>% # eliminates commas and other characters
+              mutate(work.adr= gsub("  "," ",work.adr)) %>% # remove double spaces (3 times because sometimes there is more than one double space)
+              mutate(work.adr= gsub("  "," ",work.adr)) %>%
+              mutate(work.adr= gsub("  "," ",work.adr)) 
+
+```
+
+#### 4.1.3- Removing Abreviations and frequent typos
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>% 
+             mutate(work.adr=sub("ROD | RAOD | RD | RD$" ," ROAD ",work.adr)) %>%
+             mutate(work.adr=sub(" ST$","STREET",work.adr)) %>% #change st to street when at end of string only (#avoids the Saints!)
+             mutate(work.adr=sub("ROD | RAOD | RD | RD$" ," ROAD ",work.adr)) %>%
+             mutate(work.adr= sub(" AP([A-RT-XZ]+ )"," APARTMENTS ",work.adr)) %>% #correct misspelling "appartment"          
+             mutate(work.adr= sub(" AVE$| AVE "," AVENUE ",work.adr)) %>%# Sort AVENUE Mispelling
+             mutate(work.adr= sub(" ARB([B-Z]+ )"," ARBORETUM ",work.adr)) %>%# Sort ARBORETUM Mispelling
+             mutate(work.adr= sub(" SHRIER "," SCHRIER ",work.adr)) %>%# Sort SCHRIER Mispelling
+             mutate(work.adr= sub(" ROPE WORKS | ROBEWORKS | ROBE WORKS "," ROPEWORKS ",work.adr)) %>%# Sort ROPEWORKS Mispelling
+             mutate(work.adr= sub("ROPEWORKS ARBORETUM ","ROPEWORKS 1 ARBORETUM ",work.adr)) %>% # ADD NUMBER TO ARBORETUM PLACE
+             mutate(work.adr= sub("(^FLT| FLT| FLATS|^FLATS|^FT )"," FLAT ",work.adr)) %>% # sort FLATS Mispelling
+             mutate(work.adr= gsub("([0-9]+)\\s+([A-Z]\\s+)","\\1\\2",work.adr)) # SORT space between flat suffix eg 21 A change to 21A
+  
+```
+
+#### 4.1.4- Correcting common Post Code typos
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>%
+  mutate(pc1.a= substr(pc, 1,2)) %>%
+  mutate(pc1.a= gsub("1","I",pc1.a)) %>% 
+  mutate(pc1.b= substr(pc, 3,4)) %>%
+  mutate(pc1.b= gsub("[Oo]","0",pc1.b)) %>% 
+  mutate(pc1.b= gsub(" ","",pc1.b)) %>% # remove empty spaces
+  mutate(pc2.a= str_sub(pc, -4,-3)) %>%
+  mutate(pc2.a= gsub("[Oo]","0",pc2.a)) %>% 
+  mutate(pc2.a= gsub(" ","",pc2.a)) %>% # remove empty spaces
+  mutate(pc2.b= str_sub(pc, -2)) %>%
+  mutate(pc= paste0(pc1.a, pc1.b, pc2.a, pc2.b)) %>%
+  mutate(pc=gsub(" ","",pc))
+
+```
+
+
+### 4.2- Cleaning data set "b" (e.g. GP Registry)
+
+
+#### 4.2.1- Filtering relevant records, renaming variables and uppercasing 
+
+This section will need to be **ADAPTED** to each specific data set.  
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working<- b %>% select(gp_id=GP_primaryID, UPRN_match=UPRN_match, adr1=PREMISES,
+                         adr2=STREET, pc=POSTCODE) %>%
+        mutate(adr1=replace(adr1,which(is.na(adr1)),""))%>%
+        mutate(work.adr= paste(adr1, adr2, sep=" ")) %>%
+        mutate(work.adr=sub("( Romford Essex.*)| (Barking Essex.*)|( Dagenham Essex.*)|( Chadwell Heath Romford.*)|( Rush Green Romford.*)","",work.adr)) %>% #eliminate anything from "Essex"
+        mutate(work.adr= toupper(work.adr)) # change text to upper case
+```
+
+#### 4.1.2- Removing spaces, commas and other characteres
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working <- b.working %>% mutate(work.adr= sub("^\\s+|\\s+$", "", work.adr)) %>% #remove trailing and leading white space
+              mutate(work.adr=  gsub("'","", work.adr)) %>% # replace apostrophe with "" 
+              mutate(work.adr= gsub("[\\,\\`\\.\\_]+"," ",work.adr)) %>% # eliminates commas and other characters
+              mutate(work.adr= gsub("  "," ",work.adr)) %>% # remove double spaces (3 times because sometimes there is more than one double space)
+              mutate(work.adr= gsub("  "," ",work.adr)) %>%
+              mutate(work.adr= gsub("  "," ",work.adr)) 
+
+```
+
+#### 4.1.3- Removing Abreviations and frequent typos
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working <- b.working %>% 
+             mutate(work.adr=sub("ROD | RAOD | RD | RD$" ," ROAD ",work.adr)) %>%
+             mutate(work.adr=sub(" ST$","STREET",work.adr)) %>% #change st to street when at end of string only (#avoids the Saints!)
+             mutate(work.adr=sub("ROD | RAOD | RD | RD$" ," ROAD ",work.adr)) %>%
+             mutate(work.adr= sub(" AP([A-RT-XZ]+ )"," APARTMENTS ",work.adr)) %>% #correct misspelling "appartment"          
+             mutate(work.adr= sub(" AVE$| AVE "," AVENUE ",work.adr)) %>%# Sort AVENUE Mispelling
+             mutate(work.adr= sub(" ARB([B-Z]+ )"," ARBORETUM ",work.adr)) %>%# Sort ARBORETUM Mispelling
+             mutate(work.adr= sub(" SHRIER "," SCHRIER ",work.adr)) %>%# Sort SCHRIER Mispelling
+             mutate(work.adr= sub(" ROPE WORKS | ROBEWORKS | ROBE WORKS "," ROPEWORKS ",work.adr)) %>%# Sort ROPEWORKS Mispelling
+             mutate(work.adr= sub("ROPEWORKS ARBORETUM ","ROPEWORKS 1 ARBORETUM ",work.adr)) %>% # ADD NUMBER TO ARBORETUM PLACE
+             mutate(work.adr= sub("(^FLT| FLT| FLATS|^FLATS|^FT )"," FLAT ",work.adr)) %>% # sort FLATS Mispelling
+             mutate(work.adr= gsub("([0-9]+)\\s+([A-Z]\\s+)","\\1\\2",work.adr)) # SORT space between flat suffix eg 21 A change to 21A
+  
+```
+
+#### 4.1.4- Correcting common Post Code typos
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working <- b.working %>%
+  mutate(pc1.a= substr(pc, 1,2)) %>%
+  mutate(pc1.a= gsub("1","I",pc1.a)) %>% 
+  mutate(pc1.b= substr(pc, 3,4)) %>%
+  mutate(pc1.b= gsub("[Oo]","0",pc1.b)) %>% 
+  mutate(pc1.b= gsub(" ","",pc1.b)) %>% # remove empty spaces
+  mutate(pc2.a= str_sub(pc, -4,-3)) %>%
+  mutate(pc2.a= gsub("[Oo]","0",pc2.a)) %>% 
+  mutate(pc2.a= gsub(" ","",pc2.a)) %>% # remove empty spaces
+  mutate(pc2.b= str_sub(pc, -2)) %>%
+  mutate(pc= paste0(pc1.a, pc1.b, pc2.a, pc2.b)) %>%
+  mutate(pc=gsub(" ","",pc))
+
+```
+
+
+### 5. Creating Unique Identifiers based on addresses
+
+The method to match data sets based on addresses is not straight forward. Different institutions may record them with different layouts, there may be typos in the addresses, among many other issues. By creating several unique identifiers from different chunks of the addresses we aim to offer several matching possibilities between data sets. Below, a list of the Unique Identifiers to be created in each data set ("a" and "b") is presented:
+
++ Working Address and Post Code - (WAPC)
++ Working Address (Without Post Code) - (WAWPC)
++ Truncate first 8 characters and Post Code - (T8PC)
++ Truncate first 8 characters and Post Code, but eliminating the word FLAT - (T8_FPC)
++ Property and Premise number and Post Code - (PPNPC)
+
+### 5.1- Unique Identifiers for data set "a"
+
+#### 5.1.1- Working Address and Post Code - (WAPC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>%
+  mutate(WAPC= paste0(work.adr, pc)) %>%
+  mutate(WAPC= gsub(" ","",WAPC))
+head(a.working$WAPC,3)
+
+```
+
+#### 5.1.2- Working Address Without Post Code - (WAWPC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>%
+  mutate(WAWPC= gsub(" ","",work.adr))
+head(a.working$WAWPC,3)
+```
+
+#### 5.1.3- Truncate first 8 characters and Post Code - (T8PC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>%
+   mutate(T8PC= gsub(" ","",work.adr))%>%
+   mutate(T8PC= substr(T8PC, 1, 8))%>%
+   mutate(T8PC= paste0(T8PC, pc))
+   
+head(a.working$T8PC,3)
+
+```
+
+#### 5.1.4-Truncate first 8 characters and Post Code, but eliminating the word FLAT (or ROOM) - (T8_FPC)
+
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>%
+   mutate(T8_FPC= sub("FLAT|ROOM","", WAWPC)) %>%
+   mutate(T8_FPC= substr(T8_FPC, 1, 8)) %>%
+   mutate(T8_FPC= paste0(T8_FPC, pc))
+head(a.working$T8_FPC,3)
+
+
+```
+
+#### 5.1.5-Property and Premise number and Post Code - (PPNPC)
+
+Considering that the example data set (Gazetteer) records suffix (e.g. A of B after a house number) in separate fields from the rest of the address, this part of the code needs to join the suffix with the house number. However, this additional step may not be needed in data sets in which the working address contains the suffix already (see example in section 5.2.1).
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+a.working <- a.working %>%
+   mutate(No=gsub("[^0-9]","",work.adr)) %>% # Extract the house number (and premises)
+   mutate(sfx1= ifelse(is.na(sfx.adr1),"",sfx.adr1)) %>% # Extract any suffix from PA
+   mutate(sfx2= ifelse(is.na(sfx.adr2),"",sfx.adr2)) %>% # Extract any suffix from PA
+   mutate(PPNPC= paste0(No,sfx1,sfx2,pc)) %>% # create a unique identifier based on house
+   mutate(PPNPC=gsub("-","",PPNPC)) # remove dashes
+head(a.working$PPNPC)
+
+```
+
+
+### 5.2- Unique Identifiers for data set "b"
+
+#### 5.2.1- Working Address and Post Code - (WAPC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working <- b.working %>%
+  mutate(WAPC= paste0(work.adr, pc)) %>%
+  mutate(WAPC= gsub(" ","",WAPC))
+head(b.working$WAPC,3)
+
+```
+
+#### 5.2.2- Working Address Without Post Code - (WAWPC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working <- b.working %>%
+  mutate(WAWPC= gsub(" ","",work.adr))
+head(b.working$WAWPC,3)
+
+```
+
+
+#### 5.2.3- Truncate first 8 characters and Post Code - (T8PC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working <- b.working %>%
+   mutate(T8PC= gsub(" ","",work.adr))%>%
+   mutate(T8PC= substr(T8PC, 1, 8))%>%
+   mutate(T8PC= paste0(T8PC, pc))
+   
+head(b.working$T8PC,3)
+
+```
+
+
+#### 5.2.4-Truncate first 8 characters and Post Code, but eliminating the word FLAT (or ROOM)- (T8_FPC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working <- b.working %>%
+   mutate(T8_FPC= sub("FLAT|ROOM","", WAWPC)) %>%
+   mutate(T8_FPC= substr(T8_FPC, 1, 8)) %>%
+   mutate(T8_FPC= paste0(T8_FPC, pc))
+head(b.working$T8_FPC,3)
+
+```
+
+
+#### 5.2.5-Property and Premise number and Post Code - (PPNPC)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+b.working<- b.working %>%
+  mutate(PPNPC=ifelse(grepl("[0-9]+[Az] ",work.adr)==TRUE,
+                  gsub(".*([0-9]+) |([0-9]+[A-z]).*", "\\1\\2",work.adr),
+                  gsub("[^0-9]","",work.adr))) %>%
+  mutate(PPNPC= paste0(PPNPC,pc)) %>% # create a unique identifier based on house
+  mutate(PPNPC=gsub("-","",PPNPC)) # remove dashes
+
+head(a.working$PPNPC)
+
+```
+
+
+## 6. Selecting and renaming variables in both data sets.
+
+The process of selecting the variables to be retained in the final "tidy" file would slightly differ from one data set to another (**MAY NEED TO BE ADAPTED**). However, the general criteria are the follow:
+
+1. All the Unique Identifiers based on addresses created by this algorithm. 
+2. Any unique identifier present in the original data set that could be useful in future matching processes (e.g. NHS-GP ID).
+3. One (1) single address field in which all fields containing information regarding the address are joined. 
+4. Other variables of interest such as Geo-Location. 
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE, eval=TRUE}
+
+a<- a.working %>%
+  mutate(adr=paste(adr1, sfx1, sfx2, pc,sep=" ")) %>%
+  select(WAPC,WAWPC,T8PC,T8_FPC,PPNPC,UPRN,adr,geo_east,geo_north) 
+names(a) <- paste0(names(a),"_",label.a)
+
+b <- b.working %>%
+  mutate(adr=paste(adr1, adr2, pc,sep=" ")) %>%
+  select(WAPC,WAWPC,T8PC,T8_FPC,PPNPC, gp_id, UPRN_match, adr)
+names(b) <- paste0(names(b),"_",label.b)
+  
+```
+
+
+## 7. Printing final files. 
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE, eval=TRUE}
+
+#fwrite(a, file = paste0(label.a,"_","tidy",".csv"))
+write.csv(a, file = paste0(label.a,"_","tidy",".csv"))
+
+#fwrite(b, file = paste0(label.b,"_","tidy",".csv"))
+write.csv(b, file = paste0(label.b,"_","tidy",".csv"))
+
+```
+

@@ -5,16 +5,23 @@ output: html_document
 
 ## Summary
 
-The Residents Matrix matching process consists of merging different data sets in order to 
+The stepwise matching process consists of merging two data sets based on a list of different unique identifiers. In each step of the algorithm, a different unique identifier is used to match the records that could not be matched in the previous step (unmatched records). 
 
+The outputs of the code are summarise bellow: 
 
-1- Working Address and Post Code - (WAPC)
-2- Troncade first 8 characters and Post Code - (T8PC) 
-3- Troncade first 8 characters and Post Code, but eliminating the word FLAT - (T8_FPC)
-4- Property and Premise number and Post Code - (PPNPC)
-5- Working Address (Without Post Code) - (WAWPC)
+**- Effectiveness index:** The algorithm returns a message with the number and the proportion of records succesfully matched. It reflects how "effective" is the algorithm matching addresses, but nut necessarily how accurate the matching process is (although accuracy has been found to be above 98%). 
 
+**- Matching Summary Table** A table summarising how many records were matched (and remain unmatched) when using the different unique identifiers in each step of the algorithm.
 
+**- Full dataset:** A file called "matched.csv" containing both matched an unmatched records is created in the working directory. Also, a variable called "matched.df" is created in the global environment to be able to explore the data if needed.   
+
+**- Unmatched records:** A subsample of those records that were not matched in the process is stored in the global environment in a variable called "unmatch_final". In addition,  a file called "unmatched.csv" containing such records is created in the working directory.   
+
+**- Accuracy Index (Optional):** When both datasets contain a common unique identifiers (e.g. from previous matching processes or incomplete U.I. from the original source), a cross-validation can be performed to measure the accuracy of the algorithm. A function returns a message with the number and proportion of records accurately matched. In addition, the records "wrongly matched" are stored in the global environment in a variabe called "innacurate", and saved in the working directory in the filie "innacurate.csv".    
+
+**- Efficiency Index (Optional):** An indicator of matching "Efficiency" can be also calculated when the Accuracy Index is available. Since the algorithm may match some records wrongly, this index represnts a measurement of the extend to which the records matched were paired accurately. In other words, it is a simple multiplication of the percentage of records effectively matched (Effectiveness Index) with the Accuracy Index. The function produces a message with the Efficiancy Index, and also the estimated number of records that were accurately matched (although this number may be underestimated).  
+
+**- Duplicates Exploration:** Some times, a small number of cases of one dataset matches more than one record in the second dataset. For such cases, the algorithm keeps the first record and eliminates any duplicate. This is not expceted to have a significant impact in the matching accuracy. However, duplicated cases can be explored in a variable called "dup" containing all this cases.
 
 ## 1. Opening relevant R packages
 
@@ -24,57 +31,56 @@ library("data.table")
 library("dplyr")
 library("reshape2")
 
-rm(list = ls())
-
 ```
 
 
-## 2. Upload raw data and define working data sets.
-
-Data sets are defined as "a" and "b", where "a" will be the base data set, in other words, the file to which new variables will be added to. Usually, "a" will be the largest data set. In addition, one or more "filter" data frames may be defined as "f" (e.g. f1, f2) with the aim of filtering out irrelevant records from the original data sets (e.g. use blpu to filter out commercial properties).
-
-### 2.1- Define working directory
+## 2. Define working directory
 
 ```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
 
 # Define working Directory
-wd<- setwd("//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/Community Mapping 2017/Juans_tests/2015")
-wd
+setwd("//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/Community Mapping 2017/Juans_tests/2015")
+
 ```
 
 
-```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+## 3. Upload raw data.
 
-# Upload data sets 
+Data sets are defined as "a" and "b", where "a" will be the base data set, in other words, the file to which new variables will be added to. Usually, "a" will be the largest data set.
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+rm(list = ls())
 a<- fread("gz_tidy.csv") # Gazeteer tidy data
 names(a)
 nrow(a)
+
 b<-fread("gp_tidy.csv") # GP tidy data 
 names(b)
 nrow(b)
 
-####################
+```
 
-# ALGORITHM
+### 4. Matching Function (Algorithm)
+
+The matching algorithm is performed by running and calling the function "matching(a,b)", where "a" and "b" represent the two data sets being matched. 
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
 
 ## Steps order
-
 step1<-2
 step2<-4
 step3<-5
 step4<-6
 step5<-3
 
-steps<-(c(2,4,5,6,3))
-
-## Words to identify variables containing Unique Identifiers, or Addresses
+## Defining words to identify variables containing Unique Identifiers, or Addresses
 ui<-c("adr|UPRN|id|V1.x")
 
 ## Function
 
 matching <- function (a,b) {
   
-  adr<-names(a)[grep("adr",names(a))] # define the variable containing full address in dataset "a" for filterin purposes
+  adr<-names(a)[grep("adr",names(a))] # define the variable containing full address in dataset "a" for filtering purposes
   
   first_join<-merge(b,a,by.y=names(a)[step1], by.x=names(b)[step1], all.x = TRUE)
   unmatch_1<- first_join %>% filter(is.na(get(adr))) %>% select(1:length(names(b)))
@@ -100,69 +106,132 @@ matching <- function (a,b) {
   unmatch_5<- fifth_join %>% filter(is.na(get(adr))) %>% select(1:length(names(b)))
   match_5<- fifth_join %>% filter(!is.na(get(adr))) %>%
     select(grep(ui,names(fifth_join))) 
-  
-  unmatch_final<- fifth_join %>% filter(is.na(get(adr))) %>%
+
+  unmatch_final<<- fifth_join %>% filter(is.na(get(adr))) %>%
     select(grep(ui,names(fifth_join)))
   
 
-#Matching Summary Table:
-  no.matches<-c((nrow(match_1)),(nrow(match_2)),(nrow(match_3)),
-               (nrow(match_4)),(nrow(match_5)))
-  no.unmatches<-c((nrow(unmatch_1)),(nrow(unmatch_2)),(nrow(unmatch_3)),
-               (nrow(unmatch_4)),(nrow(unmatch_5)))
-  df.process<-as.data.frame(cbind(names(a)[steps],no.matches,no.unmatches))
-  print(df.process)
-  
 #Final df  
-  tot.matches<-rbind(match_1, match_2, match_3, match_4, match_5, unmatch_final)
+  tot.matches<<-rbind(match_1, match_2, match_3, match_4, match_5, unmatch_final)
   
   matched.df <- tot.matches[order(tot.matches$V1.x),]
   matched.df <- matched.df[!duplicated(matched.df$V1.x),]
-
-  print(nrow(df_grouped))
+ 
   
-} 
+## address specific match ##
+############################
+  matched.df<- matched.df %>% 
+    mutate(UPRN_gz=ifelse(grepl("ALEX[A_Z]+.+ (COURT|CARE|320)|320 RAIN",
+                                adr_gp)==TRUE,  "010023591471",
+                      ifelse(grepl("ABBEY CARE HOME", adr_gp)==TRUE,"000100003891",
+                          ifelse(grepl("PARKVIEW [NC]|PARK VIEW N|1-2 MORL", adr_gp)==TRUE,
+                                    "000100045662",
+                             ifelse(grepl("CHASEVIEW|CHASE VIEW", adr_gp)==TRUE,
+                                    "000100101940",
+                                    ifelse(grepl("YMCA", adr_gp)==TRUE,
+                                           "000100102744",UPRN_gz))))))
+  
+
+  #Matching Summary Table:
+  no.matches<-c((nrow(match_1)),(nrow(match_2)),(nrow(match_3)),
+               (nrow(match_4)),(nrow(match_5)),
+               (nrow(unmatch_5))-nrow(filter(matched.df,is.na(UPRN_gz))))
+  no.unmatches<-c((nrow(unmatch_1)),(nrow(unmatch_2)),(nrow(unmatch_3)),
+               (nrow(unmatch_4)),(nrow(unmatch_5)),
+               nrow(filter(matched.df,is.na(UPRN_gz))))
+  steps<-c(step1,step2,step3,step4,step5)
+  
+  descrip<-names(a)[steps]
+  descrip[[6]] <- "Direct.Match"
+  
+  df.process<-as.data.frame(cbind(descrip,no.matches,no.unmatches))
+  #df.process<-as.data.frame(cbind(names(a)[steps],no.matches,no.unmatches))
+  
+  
+    matched.df <<- matched.df
+
+  
+  msg.um<-nrow(filter(matched.df,!is.na(UPRN_gz)))
+  msg.tot<-nrow(matched.df) 
+  effectiveness.index<<-round(msg.um/msg.tot*100,2) 
+  msg<-paste0("The algorithm matched ", msg.um, " out of ",msg.tot, " records. This represents a matching Effectiveness of ",effectiveness.index,"%.")  
+  
+  fwrite(matched.df, file = "matched.csv") 
+  fwrite(unmatch_final, file = "unmatched.csv") 
+  
+  print(msg) 
+  print(df.process) 
+
+  
+  names(matched.df)
+  
+}   
 
 matching(a,b)
 
-###########
+```
+
+## 5- Accuracy Index (Optional)
+
+The Accuracy Index is obtained by running and calling the function "accuracy(mui,oui)", where "mui" represents the Unique Identifier obtained as a consequence of the Matching Algorithm, whereas "oui", represents the original Unique Identifier contained in the file.  
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE}
+
+accuracy <- function (mui, oui) { 
+
+df<- matched.df %>% mutate(success=ifelse(get(mui)==get(oui),1,0))
+inaccurate<- df %>% filter(success==0)
+
+df.count<- df %>% filter(!is.na(success)) %>% group_by(success) %>% count(success) 
+  
+accuracy.index<<- round(df.count[2,2]/(df.count[2,2]+df.count[1,2])*100,2)
+
+msg<-paste0("Matching accuracy is ", accuracy.index,
+            "% ","based on ",(df.count[2,2]+df.count[1,2])," (out of ",nrow(matched.df),")",
+            " records with the same unique identifier in both data sets") 
+
+fwrite(inaccurate, file = "innacurate.csv")
+  
+print(msg)
+print(head(inaccurate))
+
+inaccurate<<-inaccurate
+
+}
+
+accuracy("UPRN_match_gp","UPRN_gz")
+
+```
 
 
-#bad<-rbind(x2f.1,x3f.1,x4f.1,x5f.1)
-#nrow(bad)
+## 6- Efficiency Index (Optional)
 
+The Efficiency Index is obtained by running and calling the function "efficiency <- (accuracy.index, effectiveness.index)", where the arguments can be added by typing the numerican value (e.g. 99%), or using the actual name of the indices (e.g. effectiveness.index) whose values should be already stored in the global environment.   
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE, eval=TRUE}
+
+
+efficiency <- function (accuracy.index, effectiveness.index) { 
+  
+  efficiency.index<-round(effectiveness.index*accuracy.index/10000,3)
+  
+  msg<- paste0("The matching efficiency is ",round(efficiency.index*100,2),"%. ",
+               "It means that at least ", round(nrow(matched.df)*efficiency.index,0),
+               " records are estimated to be accurately matched") 
+  msg
+}
+
+efficiency(accuracy.index, effectiveness.index)
 
 
 ```
 
 
+## 7- Exploring Duplicated Records
 
-## x- Managing Duplicated Records
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE, eval=TRUE}
 
-### x.1- Keeping first line
-```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
-
-
-
-dup <- df_grouped[duplicated(tot.matches$V1.x),]
-
-DUPLICATES
-n_o <- data.frame(table(good$V1.x))
-n_o[n_o$Freq > 1,]
-
-good %>% filter(V1.x==95699)
-
-
-```
-
-### x.1- Manual process
-```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
-
-```
-
-
-# Matching Accuracy Assessment
-
-```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE}
+dup <- tot.matches[duplicated(tot.matches$V1.x),]
+head(dup)
 
 ```
