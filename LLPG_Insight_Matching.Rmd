@@ -1,0 +1,378 @@
+---
+title: "Insight Matching Algo"
+author: "Juan Carpio"
+date: "12 December 2017"
+output: html_document
+---
+
+
+# match the datasets to play with the matrix pilot..
+
+
+This code matches any data set containing addresses with the LLPG.
+
+In order to run the code, some of the following part of the code mat need to be edited:
+  
+  + Define working directory.
+  + Upload raw data.
+  + Define variable labels.
+  + Define "Working address" and relevand regords.
+  + List variables from matching dataset that need to be retained.
+
+
+# CODE TO BE EDITED (if needed). 
+
+### 1- Define working directory
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE, eval=TRUE,echo=FALSE}
+rm(list=ls())
+#opts_chunk$set(root.dir = "~/Z:/Insight Hub/LLPG/Matching_LLPG")
+setwd("Z:/Insight Hub/LLPG/Matching_LLPG")
+
+```
+
+### 2- Uploading raw data
+
+The dataset to be matched with the LLPG needs to be stored in a dataframe called "b"
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+library("data.table")
+# Upload data sets 
+a<- fread("//Bbd-dfs-p-fil05/cscom/Policy and Research/Research, Intelligence and Customer Insight/Insight Hub/LLPG/UNI72LIVE20171019.csv", na.strings=c("")) 
+
+## MODIFY ##
+b<- fread("//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/2016_Resident_Matrix/RawData/GPRegister/GP_RAW_March2016.csv", na.strings=c(""), 
+          colClasses=c(NHS_NUMBER="character"))# GP Registry
+names(b)
+
+```
+
+### 3- Define variable labels
+
+The variables from the output files will identify the original data set that they were created from by adding a suffix at the end of the name of the variable. For instance, we can define "zt" as the suffix identifying variables from the Gazetteer data set (LLPG), so the variable address will be called "adr_gz". The labels for the suffix in each data set can be defined below.  
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE,echo=FALSE}
+
+label.a<- "gz" # llpg
+  
+label.b<- "gp" # GP
+  
+```
+
+
+### 4- Defining "Working address"
+
+The matching process is mainly based in a variable called "work.adr" (working address) that needs to be created at the beginning of the process. This variable contains the property/premise number, and the street name (e.g. 104 Main Street). It may require joining different columns depending on the data set.    
+
+#### 4.1- Dataset (b) to be match with the LLPG (**ADAPT THIS SECTION**)
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+library("dplyr")
+b.working<- b %>% select(everything(),id=NHS_NUMBER, name=FORENAME, surname=SURNAME,
+                         for.surname=PREVIOUS_SURNAME,gen=SEX,
+                         dob=DATE_OF_BIRTH,adr1=PREMISES,
+                         adr2=STREET, pc=POSTCODE) %>%
+        mutate(adr1=replace(adr1,which(is.na(adr1)),""))%>%
+        mutate(work.adr= paste(adr1, adr2, sep=" ")) %>%
+        mutate(work.adr=sub("( Romford Essex.*)| (Barking Essex.*)|( Dagenham Essex.*)|( Chadwell Heath Romford.*)|( Rush Green Romford.*)","",work.adr)) %>% #remove anything after area (e.g Barking)
+        mutate(work.adr= toupper(work.adr)) %>%
+        mutate(adr=paste(adr1, adr2,pc,sep=" "))# define the address to be retained
+
+```
+
+#### 4.2- LLPG (**ADAPTED ONLY IF LLPG is updated**).
+
+This section do not need to be edited unless the LLPG is updated. By default, the code filters current (Approved) and historic (e.g. demolished) properties and exclude other irrelevant properties (e.g. commertial). The user could modify such filter by editting the "Logical_Status" in the code below (8=historical, 1=Approved)  . 
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+library("dplyr")
+a.working<- a %>% filter(LOGICAL_STATUS==1|8) %>% # Filtering valid addresses (e.g. non historical)
+  select(UPRN=UPRN, adr= ADDRESS,pc=POSTCODE,geo_east=MAP_EAST, geo_north=MAP_NORTH,
+         PAO_START_NO,PAO_END_NO) %>%
+    mutate(work.adr=sub("( Romford Essex.*)|( Barking Essex.*)|( Dagenham Essex.*)|
+                              ( Chadwell Heath Romford.*)|
+                              ( Rush Green Romford.*)","",adr)) %>%
+    mutate(work.adr= toupper(work.adr))
+
+```
+
+#### 5- Variables from matching dataset (b) that need to be retained. 
+
+The names of the variables of the matching dataset that the user wants to retain after the matching process (e.g. ID, name, address) need to be specify in the code below (**use the names defined in section 4.1**).
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+
+vars.b<-("id|name|surname|for.surname|dob|gen|adr")
+
+```
+
+
+##** CODE THAT DOES NOT REQUIRE MODIFICATIONS**.
+
+## 1. Opening relevant R packages
+
+```{r setup, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+library("dplyr")
+library("reshape2")
+library("stringr")
+library("stringi")
+```
+
+## 2. Adding individual addresses for block of properties (e.g. 1-5 Mian road) in the Gazeteer (**EVALUATION==FALSE by default**)
+
+```{r , include=FALSE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE, eval=FALSE}
+
+# Creates sequences from the property number range
+a.2<-a.working %>% filter(is.na(PAO_END_NO)==FALSE)
+
+for (i in 1:nrow(a.2)){
+  
+  if (i == 1){
+    se<-a.2[i,6]:a.2[i,7]
+  } else {
+    se2<-a.2[i,6]:a.2[i,7]
+    se <- list(se,se2)
+    
+    no<-unlist(se)
+  }        
+}
+
+# Create as many dublicate records as the length of the p.number range 
+a.2 <- a.2 %>% 
+  mutate(len= as.numeric(PAO_END_NO)-as.numeric(PAO_START_NO)+1)
+n.times <- as.vector(a.2$len)
+a.2<-a.2[rep(seq_len(nrow(a.2)), n.times),] 
+a.2<- cbind(a.2,no) 
+
+# new address replacing range by individual number
+new.adr<-apply(a.2,1, function(x) {
+     new.adr<-sub("[0-9]{1,3} - [0-9]{1,3}",x[10],x[8])
+     new.adr<-as.vector(new.adr)
+     }
+  )   
+
+#cleaning dataframe
+a.2<- a.2 %>% cbind(new.adr) %>%
+  mutate(work.adr= new.adr) %>%
+  select(1:length(names(a.working)))
+
+
+#Binding new addresses to the rest of the LLPG
+a.working<- rbind(a.working,a.2)
+
+
+```
+
+
+## 3. Cleansing Function
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+
+cleansing<- function(a.working,b.working) {
+
+    df.list<- list(a.working,b.working)
+    df <- lapply(df.list, function(x) { 
+  
+
+# Removing spaces, commas and other characteres
+  
+  x <- x %>% mutate(work.adr= sub("^\\s+|\\s+$", "", work.adr)) %>% #remove                               trailing and leading white space
+              mutate(work.adr=  gsub("'","", work.adr)) %>% # replace apostrophe with "" 
+              mutate(work.adr= gsub("[\\,\\`\\.\\_]+"," ",work.adr)) %>% # eliminates commas               and other characters
+              mutate(work.adr= gsub("  "," ",work.adr)) %>% # remove double spaces (3 times               because sometimes there is more than one double space)
+              mutate(work.adr= gsub("  "," ",work.adr)) %>%
+              mutate(work.adr= gsub("  "," ",work.adr)) %>%
+# Removing Abreviations and frequent typos
+              mutate(work.adr=sub("ROD | RAOD | RD | RD$" ," ROAD ",work.adr)) %>%
+              mutate(work.adr=sub(" [A-Z] ST$| [A-Z] ST ","STREET",work.adr)) %>% #change st               to street when at end of string only (#avoids the Saints!)
+              mutate(work.adr=sub("ROD | RAOD | RD | RD$" ," ROAD ",work.adr)) %>%
+              mutate(work.adr= sub(" AP([A-RT-XZ]+ )"," APARTMENTS ",work.adr)) %>% #correct               misspelling "appartment"          
+              mutate(work.adr= sub(" AVE$| AVE "," AVENUE ",work.adr)) %>%# Sort AVENUE                   Mispelling
+              mutate(work.adr= sub(" ARB([B-Z]+ )"," ARBORETUM ",work.adr)) %>%# Sort                     ARBORETUM Mispelling
+              mutate(work.adr= sub(" SHRIER "," SCHRIER ",work.adr)) %>%# Sort SCHRIER                    Mispelling
+              mutate(work.adr= sub(" ROPE WORKS | ROBEWORKS | ROBE WORKS "," ROPEWORKS ",
+                                  work.adr)) %>%# Sort ROPEWORKS Mispelling
+              mutate(work.adr= sub("ROPEWORKS ARBORETUM ","ROPEWORKS 1 ARBORETUM ",
+                                  work.adr)) %>% # ADD NUMBER TO ARBORETUM PLACE
+              mutate(work.adr= sub("(^FLT| FLT| FLATS|^FLATS|^FT )"," FLAT ",
+                                  work.adr)) %>% # sort FLATS Mispelling
+              mutate(work.adr= gsub("([0-9]+)\\s+([A-Z]\\s+)","\\1\\2",
+                                   work.adr)) %>% # SORT space between flat suffix eg. 21 A change to 21A
+              mutate(work.adr= gsub("0VAL","OVAL",work.adr))%>% 
+# Correcting common Post Code typos
+              mutate(pc=gsub(" ","",pc)) %>%
+              mutate(pc= gsub("([A-Za-z]{1,2})(1)([oO])","\\110",pc))%>%
+              mutate(pc= gsub("([A-Za-z])([0-9])(1)([oO])","\\1\\210",pc)) %>%
+              mutate(pc= sub("^1","I",pc)) %>%
+              mutate(pc= sub("^([A-Za-z]{1,2})(I)","\\11",pc))%>%
+              mutate(pc= sub("^([A-Za-z]{1,2})([Oo])","\\10",pc))
+  })
+   a.working<<-df[[1]]
+   b.working<<-df[[2]]
+
+ }  
+
+cleansing(a.working,b.working) 
+
+```
+
+## 4. Unique Identifiers Function
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+
+ui<- function(a.working,b.working) {
+
+df.list<- list(a.working,b.working)
+  
+df <- lapply(df.list, function(x) {
+
+# Working Address and Post Code - (WAPC)
+ x <- x %>%
+  mutate(WAPC= paste0(work.adr, pc)) %>%
+  mutate(WAPC= gsub(" ","",WAPC)) %>%
+# Working Address Without Post Code - (WAWPC) # OJO
+  mutate(WAWPC= gsub(" ","",work.adr))%>%
+# Truncate first 8 characters and Post Code - (T8PC)
+  mutate(T8PC= gsub("^APARTMENT|FLAT|ROOM|FLOOR","", work.adr)) %>%
+  mutate(T8PC= substr(T8PC, 1, 8)) %>%
+  mutate(T8PC= paste0(T8PC, pc)) %>%
+  mutate(T8PC= gsub(" ","",T8PC))%>%
+# Property and Premise number and Post Code - (PPNPC)
+  mutate(PPNPC=(str_extract(work.adr,"[0-9]{1,3} - [0-9]{1,3}|[0-9]{1,3}-[0-9]{1,3}|[0-9]{1,3}+[a-zA-Z]{1}|[0-9]{1,3}"))) %>%
+  mutate(PPNPC= gsub("-","",PPNPC))%>%
+  mutate(PPNPC= ifelse(is.na(PPNPC)==TRUE,
+                       paste0("NoPropNumber_",stri_rand_strings(1,4,"[a-z]")),PPNPC))%>%
+  mutate(pc=ifelse(is.na(pc)==TRUE,
+                   paste0("NoPostCode_",stri_rand_strings(1,4,"[a-z]")),pc))%>%
+  mutate(PPNPC= paste0(PPNPC,pc)) %>% # create a unique identifier based on house
+# Truncate first 10 characters- (T10)
+  mutate(T10= sub("^APARTMENT|FLAT|ROOM|FLOOR","", work.adr)) %>%
+  mutate(T10= gsub(" ","",T10))%>%
+  mutate(T10= substr(T10, 1, 10))
+ 
+  }
+)
+
+# Creating final dataset a (LLPG)
+a.working<-df[[1]]
+a.working<- a.working %>%
+  select(WAPC,WAWPC,T8PC,PPNPC,T10,UPRN,adr,geo_east,geo_north)
+names(a.working) <- paste0(names(a.working),"_",label.a) 
+
+a<- a.working
+fwrite(a, file = paste0(label.a,"_","tidy",".csv"))
+a<<-a
+
+# Creating final dataset b
+b.working<-df[[2]]
+
+uis<-c("WAPC|WAWPC|T8PC|PPNPC|T10|") 
+vars.b<-paste0(uis,vars.b)
+
+b.working<- b.working %>% 
+  select(grep(vars.b,names(b.working))) %>%
+  select(WAPC,WAWPC,T8PC,PPNPC,T10,everything())
+names(b.working) <- paste0(names(b.working),"_",label.b)
+
+b<-b.working
+fwrite(b, file = paste0(label.b,"_","tidy",".csv"))
+b<<-b
+
+} 
+
+ui(a.working,b.working)
+
+```
+
+## 5. Matching Function (Algorithm)
+
+The matching algorithm is performed by running and calling the function "matching(b)", where "b" represent the dataset to be matched with the LLPG. 
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+
+## Defining the variables to be retained from the LLPG
+  retain<-c("UPRN_gz","adr_gz","geo_east_gz","geo_north_gz")
+## Steps order
+  steps<-c(1,2,3,5,4)    
+ 
+matching<-function(x) { 
+
+  a<- a %>% mutate(No=1:nrow(a))
+  b<- x %>% mutate(No=c(1:nrow(x)),method=NA)
+
+# First Matching    
+join<-merge(b,a,by.y=names(a)[steps[1]], 
+            by.x=names(b)[steps[1]], all.x=TRUE) 
+
+join <- join[!duplicated(join$No.x),]# remove duplicates from first join
+
+join$method[join$No.y!="NA"]<-names(a)[steps[1]]# Updates matching method
+
+join<- join %>% select(1:length(names(b)),method,No=No.y,-No.x) %>%
+      mutate(index=seq(1:nrow(join)))
+
+total<- join 
+
+  for (i in 2:length(steps)){ # loop to match based on each unique identifier
+
+filt<-  total %>% filter(is.na(method)==TRUE) %>%
+            select(index) %>% distinct() %>% unlist() 
+
+data<- total[filt,] 
+
+join<-merge(data,a,by.y=names(a)[steps[i]], 
+                by.x=names(b)[steps[i]], all.x=TRUE) %>%
+      mutate(valid=ifelse(is.na(No.y)==FALSE,"valid",NA)) %>%
+      select(valid,index) %>% 
+      unique()
+
+total<- left_join(total,join,by="index") 
+
+total$method[total$valid=="valid"]<-names(a)[steps[i]] 
+total<- total %>% select(-valid) 
+
+  }     
+
+final<-left_join(total,a,by="No") %>% select(names(b),retain)
+
+##################################
+# address-specific direct match ##
+##################################
+
+  adr.b<- names(b)[grep("work.adr",names(b))] 
+
+matched<- final %>% 
+    mutate(UPRN_def=ifelse(grepl("ALEX[A_Z]+.+ (COURT|CARE|320)|320 RAIN",
+      get(adr.b))==TRUE,  "010023591471",
+                ifelse(grepl("ABBEY CARE HOME",
+      get(adr.b))==TRUE,"000100003891",
+                ifelse(grepl("PARKVIEW [NC]|PARK VIEW N|1-2 MORL|PARK VIEW CARE HOME", get(adr.b))==TRUE,"000100045662",
+                ifelse(grepl("CHASEVIEW|CHASE VIEW", get(adr.b))==TRUE,"000100101940",
+                ifelse(grepl("YMCA", get(adr.b))==TRUE,"000100102744",UPRN_gz)))))) %>%
+    mutate(method=ifelse(is.na(method)==TRUE &
+                            is.na(UPRN_def)==FALSE,"direct.match",
+                         ifelse(is.na(method)==TRUE &
+                            is.na(UPRN_def)==TRUE,"no.match",method)))
+##########
+# OUTPUT #
+##########
+fwrite(matched, file = "matched.csv")
+matched<<-matched
+summary<-matched %>% group_by(method) %>% count() %>% arrange(desc(n))
+
+print(as.data.frame(summary)) 
+
+# Message
+msg.mch<- nrow(b)- summary[grep("no.match",summary$method),2]
+msg.tot<-ifelse(nrow(b)==sum(summary$n),nrow(b),"ERROR!")  
+
+effectiveness.index<<-round(msg.mch/msg.tot*100,2) 
+msg<-paste0("The algorithm matched ", msg.mch, " out of ",msg.tot, " records. This represents a matching Effectiveness of ",effectiveness.index,"%.")   
+
+print(msg)
+
+}     
+
+matching(b)
+
+```
+

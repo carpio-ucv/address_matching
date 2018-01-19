@@ -1,0 +1,254 @@
+---
+title: "matching_by_names_pilot"
+author: "Juan Carpio"
+date: "21 December 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+require("knitr")
+opts_knit$set(root.dir = "//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/Community Mapping 2017/Juans_tests/Juan_2017")
+
+#knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# Define working Directory
+```{r}
+setwd("//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/Community Mapping 2017/Juans_tests/Juan_2017")
+
+```
+
+
+## Opening relevant R packages
+
+```{r}
+library("data.table")
+library("dplyr")
+library("reshape2")
+library("stringi")
+
+rm(list = ls())
+
+```
+
+## Uploading datasets
+```{r}
+gp<- fread("gp_matched.csv",colClasses=(rep(c("character"),22))) # GP data
+sch<- fread("sch_matched.csv",colClasses=(rep(c("character"),20))) #school data
+
+postcodes<- fread("//dscs/cscom/Policy/Corp Information/Olypmic Hosts NKM (secure)/Community Mapping 2017/Juans_tests/2015/postcodes.csv") # Post codes within the Borough bounderies
+
+```
+
+### 3.2- Example filtering records with Post Codes out of the Borough (eval=FALSE by default)
+
+Filtering addresses out of the Borough is crucial for some data sets such as the School Census.
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE, eval=FALSE}
+
+sch <- sch %>% 
+  mutate(pc= str_extract(adr_sch,"^([Gg][Ii][Rr] 0[Aa]{2})|((([A-Za-z][0-9]{1,2})|(([A-Za-z][A-Ha-hJ-Yj-y][0-9]{1,2})|(([A-Za-z][0-9][A-Za-z])|([A-Za-z][A-Ha-hJ-Yj-y][0-9]?[A-Za-z])))) [0-9][A-Za-z]{2})$"))%>% # UK regex to validate postcodes
+  mutate(pc=gsub(" ","",pc))
+
+colnames(postcodes)[2] <- "pc"
+
+nrow(sch)#41991
+sch<- semi_join(sch,postcodes, by="pc") 
+nrow(sch)#
+
+```
+
+
+
+## Define variable labels
+
+```{r , include=TRUE, warning=FALSE, cache=TRUE, message=FALSE,echo=FALSE}
+
+label.a<- "gp" # GP
+  
+label.b<- "sch" # School
+  
+```
+
+
+## Selecting only relevant variables
+```{r}
+criteria<-c("id|dob|name|surname|gen|UPRN.def")
+
+gp_tidy<-select(gp,matches(criteria))
+sch_tidy<-select(sch,matches(criteria))
+
+
+```
+
+
+## Cleansing and UIs creation
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+
+
+df.list<- list(gp_tidy,sch_tidy)
+ 
+cleansing <- lapply(df.list, function(x) {  
+  
+  names(x)<- gsub("_.*","",names(x))
+  
+  x<- x %>%
+    #Cleaning
+    mutate(UPRN=ifelse(UPRN=="",paste0("NA_",stri_rand_strings(1,4,"[a-z]")),
+                       UPRN)) %>%
+    mutate(name=ifelse(name=="",paste0("NA_",stri_rand_strings(1,4,"[a-z]")),
+             toupper(name))) %>%
+    mutate(name=gsub("[\\,\\`\\'\\.]","",name)) %>% #remove random characters 
+    mutate(surname=ifelse(surname=="",
+              paste0("NA_",stri_rand_strings(1,4,"[a-z]")),
+              toupper(surname))) %>%
+    mutate(surname=gsub("[\\,\\`\\'\\.]","",surname)) %>% 
+    mutate(for.surname=ifelse(sum(grepl("for.surname",names(gp_tidy)))>0 &
+                  for.surname!="", toupper(for.surname),
+                  paste0("NA_",stri_rand_strings(1,4,"[a-z]")))) %>%    
+    mutate(for.surname=ifelse(sum(grepl("for.surname",names(gp_tidy)))>0,
+                  toupper(for.surname),
+                  paste0("NA_",stri_rand_strings(1,4,"[a-z]")))) %>%    
+    # UNSD - UPRN, Name,Surname, dob
+    mutate(UNSD=paste0(UPRN,name,surname,dob)) %>%
+    # UNFSD - UPRN, Name,Former Surname, dob  
+    mutate(UNFSD=paste0(UPRN,name,for.surname,dob)) %>%
+    # UISND - UPRN, Inverted Surname - Name, dob  
+    mutate(UISND=paste0(UPRN,surname,name,dob)) %>%
+    # UIFSND -  UPRN, Inverted Former Surname - Name, dob  
+    mutate(UIFSND=paste0(UPRN,for.surname,name,dob)) %>%
+    # USNSD - UPRN, Single Name, Single Surname, dob  
+    mutate(USNSD=paste0(UPRN,gsub("-.*| .*","",name),
+                        gsub("-.*| .*","",surname),dob)) %>%
+    # USNFSSD - UPRN, Single Name, Single Former Surname, dob  
+    mutate(USNFSSD=paste0(UPRN,gsub("-.*| .*","",name),
+                        gsub("-.*| .*","",for.surname),dob)) %>%
+    # UISSSND - UPRN, Inverted Single Surname - Single Name,dob  
+    mutate(UISSSND=paste0(UPRN, gsub("-.*| .*","",surname),
+                          gsub("-.*| .*","",name), dob)) %>%
+    # UISFSSND - UPRN, Inverted Single FORMER Surname - Single Name,dob  
+    mutate(UISFSSND=paste0(UPRN, gsub("-.*| .*","",for.surname),
+                          gsub("-.*| .*","",name), dob)) %>%
+    # BIUNSD - UPRN, Bigram Name, Bigram Surname, dob
+    mutate(BIUNSD=paste0(UPRN,substr(name,1,2),substr(surname,1,2),dob)) %>%
+    # BIUNFSD - UPRN, Bigram Name, Bigram Former Surname, dob  
+    mutate(BIUNFSD=paste0(UPRN,substr(name,1,2),
+                        substr(for.surname,1,2),dob)) %>%
+    # UND - UPRN, Name, dob
+    mutate(UND=paste0(UPRN,name,dob)) %>%
+    # USD - UPRN, Name, dob
+    mutate(USD=paste0(UPRN,surname,dob)) %>%
+    # UFSD - UPRN, Former Surname, dob  
+    mutate(UFSD=paste0(UPRN,for.surname,dob)) %>%
+    #### NO UPRN ####
+    # GNSD - Gender, Name,Surname, dob
+    mutate(GNSD=paste0(gen,name,surname,dob)) %>%
+    # GNFSD - Gender Name,Former Surname, dob  
+    mutate(GNFSD=paste0(gen,name,for.surname,dob)) %>%
+    # GISND - Gender, Inverted Surname - Name, dob  
+    mutate(GISND=paste0(gen,surname,name,dob)) %>%
+    # GIFSND -  Gender, Inverted Former Surname - Name, dob  
+    mutate(GIFSND=paste0(gen,for.surname,name,dob)) %>%
+    # GTRNSD - Gender, Trigram Name, Trigram Surname, dob
+    mutate(GTRNSD=paste0(gen,substr(name,1,3),substr(surname,1,3),dob))%>%
+    # GTRNFSD - Gender, Trigram Name, Trigram Surname, dob
+    mutate(GTRNFSD=paste0(gen,substr(name,1,3),
+                          substr(for.surname,1,3),dob))%>%
+    select(8:26,1:7)# this is to put the UIs at the beginning                                    # of the data.frame
+
+   
+    } ) 
+
+    a<-as.data.frame(cleansing[[1]])
+    names(a) <- paste0(names(a),"_",label.a)
+    
+    b<-as.data.frame(cleansing[[2]])
+    names(b) <- paste0(names(b),"_",label.b)
+
+```
+
+
+## 5. Matching Function (Algorithm)
+
+The matching algorithm is performed by running and calling the function "matching(b)", where "b" represent the dataset to be matched with the LLPG. 
+
+```{r , include=TRUE, warning=FALSE, cache=FALSE, message=FALSE,echo=FALSE}
+
+## Defining the variables to be retained
+  retain<-c("id","name","surnmae","dob")
+
+  steps_a<-c(1:19)    
+  steps_b<-c(1,2,1,2,5,6,5,6,9,10,11,12,13,14,15,14,15,18,19)    
+
+matching<-function(x,y) { 
+
+  a<- x %>% mutate(No=1:nrow(x))
+  b<- y %>% mutate(No=c(1:nrow(y)),method=NA)
+
+
+# First Matching    
+join<-merge(b,a,by.y=names(a)[steps_a[1]], 
+            by.x=names(b)[steps_b[1]], all.x=TRUE) 
+
+join <- join[!duplicated(join$No.x),]# remove duplicates from first join
+
+join$method[join$No.y!="NA"]<-names(a)[steps_a[1]]# Updates matching method
+
+join<- join %>% select(1:length(names(b)),method,No=No.y,-No.x) %>%
+      mutate(index=seq(1:nrow(join)))
+
+total<- join 
+#nuevo test
+#names(total)<-gsub("\\..*","",names(total))
+
+  for (i in 2:length(steps_a)){ #loop to match based on each unique identifier
+
+filt<-  total %>% filter(is.na(method)==TRUE) %>%
+            select(index) %>% distinct() %>% unlist() 
+
+data<- total[filt,] 
+
+join<-merge(data,a,by.y=names(a)[steps_a[i]],#cambio i 
+                by.x=names(b)[steps_b[i]], all.x=TRUE) %>% #cambio i
+      mutate(valid=ifelse(is.na(No.y)==FALSE,"valid",NA)) %>%
+      select(valid,index) %>% 
+      unique()
+
+total<- left_join(total,join,by="index") 
+
+total$method[total$valid=="valid"]<-names(a)[steps_a[i]] #cambio i
+total<- total %>% select(-valid) 
+
+  }     
+
+final<-left_join(total,a,by="No") 
+final<-final %>% select(grep("id|name|dob|method",names(final))) %>%
+      mutate(method=ifelse(is.na(method)==TRUE,"no.match",method))
+  #select(names(b),retain)
+
+
+##########
+# OUTPUT #
+##########
+fwrite(final, file = "matched.csv")
+matched<<-final
+summary<-final %>% group_by(method) %>% count() %>% arrange(desc(n))
+
+print(as.data.frame(summary)) 
+
+# Message
+msg.mch<- nrow(b)- summary[grep("no.match",summary$method),2]
+msg.tot<-ifelse(nrow(b)==sum(summary$n),nrow(b),"ERROR!")  
+
+effectiveness.index<<-round(msg.mch/msg.tot*100,2) 
+msg<-paste0("The algorithm matched ", msg.mch, " out of ",msg.tot, " records. This represents a matching Effectiveness of ",effectiveness.index,"%.")   
+
+print(msg)
+
+}     
+
+matching(a,b)
+
+```
